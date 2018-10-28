@@ -1,24 +1,27 @@
 import boto3
 import pickle
 from shutil import copy
-
+import config
 aws_connect = boto3.client('logs')
 LogStreamData_Raw = {}
 LogStreamData_old = {}
 LogStreamData_old_modified = {}
 Download_LogFiles = {}
 Stream_dump_metadata_files = {}
+LogStreamName = config.CLOUDWATCH_STREAMNAME
 
 
-'''This function will write the given data to the given file'''
 def write_to_file(filename,payload):
+    """This function will write the given
+    data to the given file"""
     with open(filename,'ab') as temp_file:
         temp_file.write(payload)
     return None
 
 
-'''This will dump and fetch the key values to/from a file'''
-def dump_values(filename,payload,flag):
+def dump_values(filename, flag, payload=None):
+    """This will dump and fetch
+    the key values to/from a file"""
     global LogStreamData_old
     if flag == 'DUMP':
         with open(filename,'wb') as dump_file:
@@ -28,6 +31,7 @@ def dump_values(filename,payload,flag):
             LogStreamData_old = pickle.load(fetch_file)
     return None
 
+
 def make_backup_of_dump_files(filename):
     file = '''{fn}.{ext}'''
     for numbers in range(5,0,-1):
@@ -35,8 +39,10 @@ def make_backup_of_dump_files(filename):
     copy(filename,file.format(fn=filename, ext='0'))
     return None
 
-'''This function will describe the log stream to filter the new data'''
+
 def describe_stream(stream_name):
+    """This function will describe the
+    log stream to filter the new data"""
     global LogStreamData_Raw
     try:
         LogStreamData_Raw = aws_connect.describe_log_streams(logGroupName=stream_name,
@@ -46,19 +52,20 @@ def describe_stream(stream_name):
     return LogStreamData_Raw['logStreams']
 
 
-'''This function will format the logstream data by adding the filename as a key to its metadata'''
 def format_logstreamdata(payload):
+    """This function will format the logstream data
+    by adding the filename as a key to its metadata"""
     for data in payload:
         LogStreamData_old_modified[data['logStreamName']] = data
     return LogStreamData_old_modified
 
-'''
-Flags for log file:
-NLF - Newly created log file.
-OLFA - Old log file has been appended with new data
-'''
 
 def check_for_new_logs(OldStreamData, NewStreamData):
+    """
+    Flags for log file:
+    NLF - Newly created log file.
+    OLFA - Old log file has been appended with new data
+    """
     global Download_LogFiles
     OldLogFiles = OldStreamData.keys()
     NewLogFIles = NewStreamData.Key()
