@@ -2,10 +2,10 @@ import boto3
 import pickle
 from shutil import copy
 import config
+
 aws_connect = boto3.client('logs')
 LogStreamData_Raw = {}
 LogStreamData_old = {}
-LogStreamData_old_modified = {}
 Download_LogFiles = {}
 Stream_dump_metadata_files = {}
 LogStreamName = config.CLOUDWATCH_STREAMNAME
@@ -29,7 +29,7 @@ def dump_values(filename, flag, payload=None):
     elif flag == 'PICK':
         with open(filename,'rb') as fetch_file:
             LogStreamData_old = pickle.load(fetch_file)
-    return None
+    return LogStreamData_old if (flag == 'PICK') else None
 
 
 def make_backup_of_dump_files(filename):
@@ -55,6 +55,7 @@ def describe_stream(stream_name):
 def format_logstreamdata(payload):
     """This function will format the logstream data
     by adding the filename as a key to its metadata"""
+    LogStreamData_old_modified = {}
     for data in payload:
         LogStreamData_old_modified[data['logStreamName']] = data
     return LogStreamData_old_modified
@@ -68,7 +69,7 @@ def check_for_new_logs(OldStreamData, NewStreamData):
     """
     global Download_LogFiles
     OldLogFiles = OldStreamData.keys()
-    NewLogFIles = NewStreamData.Key()
+    NewLogFIles = NewStreamData.keys()
     for newfiles in list(set(NewLogFIles) - set(OldLogFiles)):
         Download_LogFiles[newfiles] = 'NLF'
     for logfiles in NewStreamData:
@@ -79,3 +80,11 @@ def check_for_new_logs(OldStreamData, NewStreamData):
             print excp
     return Download_LogFiles
 
+for Streams in LogStreamName:
+    Streams_described = describe_stream(Streams)
+    formated_logstreamdata = format_logstreamdata(payload=Streams_described['logStreams'])
+    Loaded_Streamdata = dump_values(filename=config.dump_matadata_files(Streams)[0], flag='PICK')
+    print(Loaded_Streamdata)
+    print(formated_logstreamdata)
+    check_for_new_logs(OldStreamData=Loaded_Streamdata, NewStreamData=formated_logstreamdata)
+    print Download_LogFiles
