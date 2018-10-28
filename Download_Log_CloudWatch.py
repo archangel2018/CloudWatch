@@ -82,7 +82,7 @@ def check_for_new_logs(OldStreamData, NewStreamData):
 
 for Streams in LogStreamName:
     Streams_described = describe_stream(Streams)
-    formated_logstreamdata = format_logstreamdata(payload=Streams_described['logStreams'])
+    formated_logstreamdata = format_logstreamdata(payload=Streams_described)
     Loaded_Streamdata = dump_values(filename=config.dump_matadata_files(Streams)[0], flag='PICK')
     print(Loaded_Streamdata)
     print(formated_logstreamdata)
