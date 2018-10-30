@@ -11,10 +11,10 @@ Stream_dump_metadata_files = {}
 LogStreamName = config.CLOUDWATCH_STREAMNAME
 
 
-def write_to_file(filename,payload):
+def write_to_file(filename, payload):
     """This function will write the given
     data to the given file"""
-    with open(filename,'ab') as temp_file:
+    with open(filename, 'ab') as temp_file:
         temp_file.write(payload)
     return None
 
@@ -79,6 +79,23 @@ def check_for_new_logs(OldStreamData, NewStreamData):
         except Exception as excp:
             print excp
     return Download_LogFiles
+
+
+def download_log_events(loggroupname, logstreamname,flag,token):
+    try:
+        raw_logs = aws_connect.get_log_events(logGroupName=loggroupname, logStreamName=logstreamname,
+                                              startFromHead=flag, nextToken=token)
+    except Exception as excp:
+        print excp
+
+
+def log_to_file(filename,payload):
+    try:
+        with open(filename, 'ab') as log_file:
+            log_file.write(payload)
+    except Exception as excp:
+        print excp
+
 
 for Streams in LogStreamName:
     Streams_described = describe_stream(Streams)
