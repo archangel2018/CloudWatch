@@ -5,8 +5,10 @@ CLOUDWATCH_STREAMNAME = ['']
  Directory and .pkl files should be touched !! '''
 
 
-def dump_matadata_files(filename):
+def dump_metadata_files(filename):
     return {
         'StreamNameShouldMatch -- > CLOUDWATCH_STREAMNAME': ['/opt/cloudwatch-scripts/Stream_name/stream_metadata.pkl',
-                                                              '/opt/cloudwatch-scripts/Stream_name/log_metadata.pkl']
+                                                              '/opt/cloudwatch-scripts/Stream_name/log_metadata.pkl',
+                                                             '/opt/cloudwatch-scripts/Stream_name/raw_out.logs',
+                                                             '/opt/cloudwatch-scripts/Stream_name/streamname.log']
     }[filename]
