@@ -3,16 +3,17 @@ import pickle
 from shutil import copy
 import config
 from subprocess import PIPE, Popen
+import ipdb
 
 '''Assigning variable here that are used inside DEF's and loops'''
 aws_connect = boto3.client('logs')
-LogStreamData_Raw = {}
-LogStreamData_old = {}
-Download_LogFiles = {}
+LogGroupData_Raw = {}
+Data_old = {}
+Download_LogStreamFiles = {}
 Stream_dump_metadata_files = {}
-LogStreamName = config.CLOUDWATCH_STREAMNAME
-Dump_LogData = {}
-Dump_Streamdata = {}
+LogGroupName = config.CLOUDWATCH_GROUPNAME
+Dump_LogStreamData = {}
+Dump_LogGroupdata = {}
 make_logfile_for_kibana = []
 cmd_grep_raw = '''cat {filename_in} | grep -vi "performance_schema" | grep -vi INFORMATION_SCHEMA  | 
 grep -vi "mysql-connector-java" | grep -vi 'Your log message was truncated' | grep -v '^$' >> {filename_out} '''
@@ -23,16 +24,16 @@ def dump_values(filename, flag, payload=None):
     This will dump and fetch
     the key values to/from a given file.
     """
-    global LogStreamData_old
+    global Data_old
     if flag == 'DUMP':
         with open(filename, 'wb') as dump_file:
             pickle.dump(payload, dump_file)
             dump_file.close()
     elif flag == 'PICK':
         with open(filename, 'rb') as fetch_file:
-            LogStreamData_old = pickle.load(fetch_file)
+            Data_old = pickle.load(fetch_file)
             fetch_file.close()
-    return LogStreamData_old if (flag == 'PICK') else None
+    return Data_old if (flag == 'PICK') else None
 
 
 def make_backup_of_dump_files(filename):
@@ -47,49 +48,56 @@ def make_backup_of_dump_files(filename):
     return None
 
 
-def describe_stream(stream_name):
+def describe_group(group_name):
     """
     This function will describe the
     log stream to filter the new data.
+    :param group_name: Name of the steam
+    :return: Log steam meta data values i.e logfile name , last modified time.
     """
-    global LogStreamData_Raw
+    global LogGroupData_Raw
     try:
-        LogStreamData_Raw = aws_connect.describe_log_streams(logGroupName=stream_name,
-                                                             orderBy='LastEventTime', descending=True, limit=50)
+        LogGroupData_Raw = aws_connect.describe_log_streams(logGroupName=group_name,
+                                                            orderBy='LastEventTime', descending=True, limit=50)
     except Exception as excp:
         print(excp)
-    return LogStreamData_Raw['logStreams']
+    return LogGroupData_Raw['logStreams']
 
 
-def format_logstreamdata(payload):
+def format_loggroupdata(payload):
     """
     This function will format the logstream data
     by adding the filename as a key to its metadata.
+    :param payload: Current logstream metadata
+    :return:
     """
-    LogStreamData_old_modified = {}
+    LogGroupData_old_modified = {}
     for data in payload:
-        LogStreamData_old_modified[data['logStreamName']] = data
-    return LogStreamData_old_modified
+        LogGroupData_old_modified[data['logStreamName']] = data
+    return LogGroupData_old_modified
 
 
-def check_for_new_logs(OldStreamData, NewStreamData):
+def check_for_new_logs(OldGroupData, NewGroupData):
     """
     Flags for log file:
     NLF - Newly created log file.
     OLFA - Old log file has been appended with new data.
+    :param OldGroupData: Pass the Previous stream metadata
+    :param NewGroupData: Pass the new stream metadata
+    :return: This function will return the status of log files that needs to downloaded
     """
-    global Download_LogFiles
-    OldLogFiles = OldStreamData.keys()
-    NewLogFIles = NewStreamData.keys()
+    global Download_LogStreamFiles
+    OldLogFiles = OldGroupData.keys()
+    NewLogFIles = NewGroupData.keys()
     for newfiles in list(set(NewLogFIles) - set(OldLogFiles)):
-        Download_LogFiles[newfiles] = 'NLF'
-    for logfiles in NewStreamData:
+        Download_LogStreamFiles[newfiles] = 'NLF'
+    for logfiles in NewGroupData:
         try:
-            if NewStreamData[logfiles]['lastIngestionTime'] != OldStreamData[logfiles]['lastIngestionTime']:
-                Download_LogFiles[logfiles] = 'OLFA'
+            if NewGroupData[logfiles]['lastIngestionTime'] != OldGroupData[logfiles]['lastIngestionTime']:
+                Download_LogStreamFiles[logfiles] = 'OLFA'
         except Exception as excp:
             print(excp)
-    return Download_LogFiles
+    return Download_LogStreamFiles
 
 
 def log_to_file(filename, payload):
@@ -122,61 +130,71 @@ def execute_shell_commands(cmd):
     return output
 
 
+ipdb.set_trace()
 '''Log download process starts here !!'''
-for Streams in LogStreamName:
-    Streams_described = describe_stream(Streams)
-    formated_logstreamdata = format_logstreamdata(payload=Streams_described)
-    Loaded_Streamdata = dump_values(filename=config.dump_metadata_files(Streams)[0], flag='PICK')
-    Loaded_LogData = dump_values(filename=config.dump_metadata_files(Streams)[1], flag='PICK')
-    print(Loaded_Streamdata)
-    print(formated_logstreamdata)
-    check_for_new_logs(OldStreamData=Loaded_Streamdata, NewStreamData=formated_logstreamdata)
-    print(Download_LogFiles)
+for Groups in LogGroupName:
+    Groups_described = describe_group(Groups)
+    formated_loggroupdata = format_loggroupdata(payload=Groups_described)
+    Loaded_LogGroupdata = dump_values(filename=config.dump_metadata_files(Groups)[0], flag='PICK')
+    Loaded_LogStreamData = dump_values(filename=config.dump_metadata_files(Groups)[1], flag='PICK')
+    print(Loaded_LogGroupdata)
+    print(formated_loggroupdata)
+    check_for_new_logs(OldGroupData=Loaded_LogGroupdata, NewGroupData=formated_loggroupdata)
+    print(Download_LogStreamFiles)
     try:
-        for Logfiles in Download_LogFiles:
+        for LogStreamfiles in Download_LogStreamFiles:
             '''This statement will be executed if the log file is newly generated'''
-            if Download_LogFiles[Logfiles] == 'NLF':
+            if Download_LogStreamFiles[LogStreamfiles] == 'NLF':
                 '''creating a empty key in the dict for the new logfile'''
-                Loaded_LogData[Logfiles] = {}
-                Loaded_LogData[Logfiles]['nextToken'] = 0
+                Loaded_LogStreamData[LogStreamfiles] = {}
+                Loaded_LogStreamData[LogStreamfiles]['nextForwardToken'] = 0
                 Tailflag = True
                 '''This while loop will run until the end of the log file is downloaded'''
                 while True:
-                    Next_Token = Loaded_LogData[Logfiles]['nextToken']
-                    raw_logs = aws_connect.get_log_events(LogGroupName=Logfiles, LogStreamName=Streams,
+                    Next_Token = Loaded_LogStreamData[LogStreamfiles]['nextForwardToken']
+                    raw_logs = aws_connect.get_log_events(LogGroupName=LogStreamfiles, logStreamName=Groups,
                                                           startFromHead=Tailflag, nextToken=Next_Token)
-                    [log_to_file(config.dump_metadata_files(Streams)[2], msg) for msg in raw_logs['events']]
-                    Loaded_LogData[Logfiles]['nextToken'] = raw_logs['nextToken']
+                    if raw_logs['events']:
+                        [log_to_file(config.dump_metadata_files(Groups)[2],
+                                     str(msg['message']+'\n')) for msg in raw_logs['events']]
+                    Loaded_LogStreamData[LogStreamfiles]['nextForwardToken'] = raw_logs['nextForwardToken']
                     '''Setting the Tailflag variable to False as first iteration would have downloaded the first 10000
                     lines of the file(Till 1 mb)'''
                     Tailflag = False
                     '''Terminate the while loop if the lasttoken and current token matches'''
-                    if Loaded_LogData[Logfiles]['nextToken'] == raw_logs['nextToken']:
+                    if Loaded_LogStreamData[LogStreamfiles]['nextForwardToken'] == raw_logs['nextForwardToken']:
                         del raw_logs['events']
-                        Dump_LogData[Logfiles] = raw_logs
-                        make_logfile_for_kibana.append(Streams)
+                        del raw_logs['ResponseMetadata']
+                        Dump_LogStreamData[LogStreamfiles] = raw_logs
+                        make_logfile_for_kibana.append(Groups)
                         print('exiting loop')
                         break
-            elif Download_LogFiles[Logfiles] == 'OLFA':
+            elif Download_LogStreamFiles[LogStreamfiles] == 'OLFA':
                 while True:
-                    Next_Token = Loaded_LogData[Logfiles]['nextToken']
-                    raw_logs = aws_connect.get_log_events(LogGroupName=Logfiles, LogStreamName=Streams,
+                    Next_Token = Loaded_LogStreamData[LogStreamfiles]['nextForwardToken']
+                    raw_logs = aws_connect.get_log_events(logGroupName=Groups, logStreamName=LogStreamfiles,
                                                           nextToken=Next_Token)
-                    [log_to_file(config.dump_metadata_files(Streams)[2], msg) for msg in raw_logs['events']]
-                    Loaded_LogData[Logfiles]['nextToken'] = raw_logs['nextToken']
-                    if Loaded_LogData[Logfiles]['nextToken'] == raw_logs['nextToken']:
+                    if raw_logs['events']:
+                        [log_to_file(config.dump_metadata_files(Groups)[2],
+                                     str(msg['message']+'\n')) for msg in raw_logs['events']]
+                    Loaded_LogStreamData[LogStreamfiles]['nextForwardToken'] = raw_logs['nextForwardToken']
+                    if Loaded_LogStreamData[LogStreamfiles]['nextForwardToken'] == raw_logs['nextForwardToken']:
                         del raw_logs['events']
-                        Dump_LogData[Logfiles] = raw_logs
-                        make_logfile_for_kibana.append(Streams)
+                        del raw_logs['ResponseMetadata']
+                        Dump_LogStreamData[LogStreamfiles] = raw_logs
+                        make_logfile_for_kibana.append(Groups)
                         print('Exiting loop')
                         break
     except Exception as excp:
         print(excp)
-
-for dowloadedfiles in make_logfile_for_kibana:
-    cmd_grep = cmd_grep_raw.format(filename_in=config.dump_metadata_files(dowloadedfiles)[2], 
-                                   filename_out=config.dump_metadata_files(dowloadedfiles)[3])
+exit()
+for downloadedfiles in make_logfile_for_kibana:
+    cmd_grep = cmd_grep_raw.format(filename_in=config.dump_metadata_files(downloadedfiles)[2],
+                                   filename_out=config.dump_metadata_files(downloadedfiles)[3])
     cmd_output = execute_shell_commands(cmd_grep)[1]
-    if cmd_output != None:
+    if cmd_output != 'None':
         print('Error while executing command')
-        open(config.dump_metadata_files(dowloadedfiles)[2], 'w').close() 
+        open(config.dump_metadata_files(dowloadedfiles)[2], 'w').close()
+    dump_values(filename=config.dump_metadata_files(downloadedfiles)[0], flag='DUMP', payload=Dump_LogStreamData)
+    dump_values(filename=config.dump_metadata_files(downloadedfiles)[1], flag='DUMP', payload=Dump_LogGroupdata)
+
