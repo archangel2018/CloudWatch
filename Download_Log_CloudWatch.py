@@ -53,8 +53,8 @@ def make_backup_of_dump_files(filename):
     """
     logging.info('Rotating the metadata file')
     file = '''{fn}.{ext}'''
-    for numbers in range(5, 0, -1):
-        copy(file.format(fn=filename, ext=str(numbers-1)), file.format(fn=filename, ext=str(numbers-1)))
+    for numbers in range(10, 0, -1):
+        copy(file.format(fn=filename, ext=str(numbers-1)), file.format(fn=filename, ext=str(numbers)))
     copy(filename, file.format(fn=filename, ext='0'))
     return None
 
@@ -111,7 +111,6 @@ def check_for_new_logs(OldGroupData, NewGroupData):
         if Download_LogStreamFiles[rm_keys] == 'NLF':
             del NewGroupData[rm_keys]
     for logfiles in NewGroupData:
-        print (logfiles)
         try:
             if NewGroupData[logfiles]['lastIngestionTime'] != OldGroupData[logfiles]['lastIngestionTime']:
                 Download_LogStreamFiles[logfiles] = 'OLFA'
@@ -152,8 +151,11 @@ def execute_shell_commands(cmd):
         logging.error(excp)
     return output
 
+
 logging.info('''Log download process starts here !!''')
 for Groups in LogGroupName:
+    make_backup_of_dump_files(filename=config.dump_metadata_files(Groups)[0])
+    make_backup_of_dump_files(filename=config.dump_metadata_files(Groups)[1])
     formated_loggroupdataTemp = {}
     Groups_described = describe_group(Groups)
     formated_loggroupdata = format_loggroupdata(payload=Groups_described)
@@ -161,8 +163,8 @@ for Groups in LogGroupName:
     Loaded_LogGroupdata = dump_values(filename=config.dump_metadata_files(Groups)[0], flag='PICK')
     Loaded_LogStreamData = dump_values(filename=config.dump_metadata_files(Groups)[1], flag='PICK')
     check_for_new_logs(OldGroupData=Loaded_LogGroupdata, NewGroupData=formated_loggroupdataTemp)
-    Dump_LogStreamData = Loaded_LogStreamData
-    print(Download_LogStreamFiles)
+    Dump_LogStreamData.update(Loaded_LogStreamData)
+    logging.info("Downloading the log stream files - %s" %(Download_LogStreamFiles))
     try:
         for LogStreamfiles in Download_LogStreamFiles:
             '''This statement will be executed if the log file is newly generated'''
@@ -182,6 +184,9 @@ for Groups in LogGroupName:
                                                               startFromHead=Tailflag)
                     else:
                         raw_logs = aws_connect.get_log_events(logGroupName=Groups, logStreamName=LogStreamfiles,nextToken=Next_Token)
+                    logging.info("Log downloading retry attempt %s and HttpResponse Code - %s"
+                                 % (raw_logs['ResponseMetadata']['RetryAttempts'],
+                                    raw_logs['ResponseMetadata']['HTTPStatusCode']))
                     if raw_logs['events']:
                         log_to_file(config.dump_metadata_files(Groups)[2], raw_logs['events'])
                     '''Setting the Tailflag variable to False as first iteration would have downloaded the first 10000
@@ -202,7 +207,7 @@ for Groups in LogGroupName:
                 while True:
                     Next_Token = Loaded_LogStreamData[LogStreamfiles]['nextForwardToken']
                     logging.info("Initial Token value %s", Next_Token)
-                    logging.info("Downloadin logs for file %s %s", LogStreamfiles, LogStreamfiles)
+                    logging.info("Downloading logs for file %s" %(LogStreamfiles))
                     time.sleep(global_sleep_time)
                     raw_logs = {}
                     try:
@@ -210,7 +215,9 @@ for Groups in LogGroupName:
                                                               nextToken=Next_Token)
                     except Exception as e:
                         logging.exception(e)
-                    logging.info(raw_logs['ResponseMetadata'])
+                    logging.info("Log downloading retry attempt %s and HttpResponse Code - %s"
+                                 %(raw_logs['ResponseMetadata']['RetryAttempts'],
+                                   raw_logs['ResponseMetadata']['HTTPStatusCode']))
                     if raw_logs['events']:
                         log_to_file(config.dump_metadata_files(Groups)[2], raw_logs['events'])
                     if Loaded_LogStreamData[LogStreamfiles]['nextForwardToken'] == raw_logs['nextForwardToken']:
@@ -229,8 +236,6 @@ for Groups in LogGroupName:
             Download_LogStreamFiles[LogStreamfiles] = 'Done'
     except Exception as excp:
         logging.exception(excp)
-    logging.info(Dump_LogStreamData.keys())
-    logging.info(formated_loggroupdata.keys())
     dump_values(filename=config.dump_metadata_files(Groups)[1], flag='DUMP', payload=Dump_LogStreamData)
     dump_values(filename=config.dump_metadata_files(Groups)[0], flag='DUMP', payload=formated_loggroupdata)
     Dump_LogStreamData = {}
@@ -238,8 +243,8 @@ for Groups in LogGroupName:
     formated_loggroupdata = {}
 
 
-logging.info(make_logfile_for_kibana)
-for downloadedfiles in make_logfile_for_kibana:
+logging.info(list(set(make_logfile_for_kibana)))
+for downloadedfiles in list(set(make_logfile_for_kibana)):
     cmd_grep = cmd_grep_raw.format(filename_in=config.dump_metadata_files(downloadedfiles)[2],
                                    filename_out=config.dump_metadata_files(downloadedfiles)[3])
     cmd_output = execute_shell_commands(cmd_grep)[1]
